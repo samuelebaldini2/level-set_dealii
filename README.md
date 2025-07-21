@@ -1,2 +1,8 @@
 # level-set_dealii
-This repository contains a C++ implementation of a level set method using the deal.II finite element library. The reinitialization of the level set function is performed via closest point projection onto the interface, followed by a tangential correction step to improve accuracy near the zero level set. Finally, the signed distance function is computed with a direct procedure that finds the closest point on the surface for each point of the grid. This search is performed with a KD-Tree algorithm, in particular using the library https://github.com/jlblancoc/nanoflann.git.
+This repository contains a C++ implementation of a level set method based on the deal.II finite element library. The code extends the approach introduced in the second minicode of the step-87 tutorial.
+
+The reinitialization of the level set function is performed via closest point projection onto the interface, followed by a tangential correction step to enhance accuracy near the zero level set. Finally, the signed distance function is computed using a direct algorithm that, for each grid point, finds the closest point on the surface. This search is efficiently performed using a KD-Tree, provided by the nanoflann library.
+
+[deal.II](https://www.dealii.org)
+[step-87 tutorial]([https://www.dealii.org](https://www.dealii.org/current/doxygen/deal.II/step_87.html))
+[nanoflann](https://github.com/jlblancoc/nanoflann.git)
