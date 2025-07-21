@@ -4,8 +4,7 @@ This repository contains a C++ implementation of a level set method based on the
 The reinitialization of the level set function is performed via closest point projection onto the interface, followed by a tangential correction step to enhance accuracy near the zero level set. Finally, the signed distance function is computed using a direct algorithm that, for each grid point, finds the closest point on the surface. This search is efficiently performed using a KD-Tree, provided by the [nanoflann](https://github.com/jlblancoc/nanoflann.git) library.
 
 ## Features
-- Closest point projection reinitialization
-- Tangential correction for improved accuracy
+- Closest point projection with tengential correction
 - Direct signed distance computation using KD-Tree
 - Based on deal.II [step-87 tutorial](https://www.dealii.org/current/doxygen/deal.II/step_87.html)
   
