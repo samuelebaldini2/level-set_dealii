@@ -20,6 +20,7 @@ int main(int argc, char **argv)
   level_set<2,2> levelset(grd, pcout);
   levelset.init();
   levelset.reinit();
+  levelset.print();
   grd.write_vtu(0.0,0);
 
   double dt = 0.01;
@@ -29,9 +30,9 @@ int main(int argc, char **argv)
     pcout<<"Iteration: "<<it<<std::endl;
     levelset.adv_rk4(dt*it, dt);
     levelset.reinit();
-    if (it % 1 == 0)
+    if ((it+1) % 1 == 0)
     {
-      levelset.print(levelset.signed_distance,"solution");
+      levelset.print();
       grd.write_vtu(dt*it, it);
     }   
   }
