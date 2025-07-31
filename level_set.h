@@ -51,6 +51,7 @@
 #include <vector>
 #include <numeric>
 #include <algorithm>
+#include <cmath>
 
 // local
 #include "grid.h"
@@ -83,6 +84,46 @@ namespace LA
 #endif
 }
 
+template <int dim>
+struct Segmento {
+    Point<dim> p1;
+    Point<dim> p2;
+
+    // Punto medio del segmento
+    Point<dim> midpoint() const {
+      Point<dim> mid;
+      for (int d = 0; d < dim; ++d)
+        mid[d] = 0.5 * (p1[d] + p2[d]);
+      return mid;
+    }
+
+    // Lunghezza del segmento
+    double length() const {
+      return (p2 - p1).norm();
+    }
+
+    // Distanza da un punto al segmento
+    double distance_to(const Point<dim> &P) const {
+      Tensor<1, dim> AB = p2 - p1;
+      Tensor<1, dim> AP = P - p1;
+
+      double ab_squared = AB.norm_square();
+      if (ab_squared == 0.0)
+        return (P - p1).norm();  // Segmento degenere
+
+      double t = (AP * AB) / ab_squared;
+
+      if (t <= 0.0)
+        return (P - p1).norm();
+      else if (t >= 1.0)
+        return (P - p2).norm();
+      else {
+        Point<dim> projection = p1 + t * AB;
+        return (P - projection).norm();
+      }
+    }
+};
+
 template <int dim, int spacedim, typename T>
 std::tuple<std::vector<Point<spacedim>>, std::vector<types::global_dof_index>>
 collect_support_points_with_narrow_band(
@@ -93,7 +134,7 @@ collect_support_points_with_narrow_band(
   const double                                 narrow_band_threshold);
 
 template <int dim, int spacedim, typename T>
-std::vector<Point<spacedim>>
+std::tuple<std::vector<Point<spacedim>> , std::vector<std::vector<int>> >
 collect_interface_points_linear(
   const Mapping<dim, spacedim>                &mapping,
   const DoFHandler<dim, spacedim>             &dof_handler_signed_distance,
@@ -121,22 +162,44 @@ struct DealII_PointCloud
     bool kdtree_get_bbox(BBOX&) const { return false; }
 };
 
+template <int dim>
+struct DealII_SegmentCloud
+{
+    std::vector<Segmento<dim>> pts;
+
+    inline size_t kdtree_get_point_count() const { return pts.size(); }
+
+    inline double kdtree_get_pt(const size_t idx, const size_t d) const {
+        return pts[idx].midpoint()[d];  
+    }
+
+    template <class BBOX>
+    bool kdtree_get_bbox(BBOX&) const { return false; }
+};
+
 template <typename T>
 std::vector<T> gather_all_vectors(const std::vector<T> &local_data, MPI_Comm comm);
 
 template <int dim>
 std::vector<Point<dim>> gather_local_points(const std::vector<Point<dim>> &local_data);
 
+template <int dim>
+std::vector<Segmento<dim>> gather_local_segments(std::vector<std::vector<int>> interface_segments_idx, std::vector<Point<dim>>);
+
 template <int dim, int fe_degree>
 class level_set
 {
 public:
-  level_set(const grid<dim> &, const ConditionalOStream &);
+  level_set(const std::string, const grid<dim> &, const ConditionalOStream &);
   void init();
-  void reinit();
+  void init_test();
+  void reinit_with_tangential_correction(double , int);
+  void reinit_with_planes(int);
   void adv(double);
   void adv_rk4(double, double);
   void print();
+  std::vector<double> compute_error_l2();
+  LinearAlgebra::distributed::Vector<double> * get_field_ptr();
 
 private:
   void compute_system_matrix_rk();
@@ -146,12 +209,16 @@ private:
   const FE_Q<dim>       fe;
   const MappingQ1<dim>  mapping;
   DoFHandler<dim>       dof_handler;
+  const ConditionalOStream *pcout_ptr;
+  const std::string field_name;
+
   AffineConstraints<double> constraints;
 
   IndexSet locally_owned_dofs;
   IndexSet locally_relevant_dofs;
 
   LinearAlgebra::distributed::Vector<double> signed_distance;
+  LinearAlgebra::distributed::Vector<double> signed_distance_test;
 
   dealii::LinearAlgebraPETSc::MPI::SparseMatrix system_matrix;
   
@@ -159,8 +226,6 @@ private:
   
   dealii::LinearAlgebraPETSc::MPI::Vector rk_solution;
   dealii::LinearAlgebraPETSc::MPI::Vector system_rhs;
-
-  const ConditionalOStream *pcout_ptr;
 };
 
 #include "level_set.tpp"
