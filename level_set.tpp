@@ -1,30 +1,3 @@
-// Funzione che serializza un vettore di segmenti in un buffer di double
-template <int dim>
-std::vector<double> serialize_segments(const std::vector<Segmento<dim>> &segments) {
-    std::vector<double> buffer(segments.size() * 2 * dim);
-    for (size_t i = 0; i < segments.size(); ++i) {
-        for (int d = 0; d < dim; ++d) {
-            buffer[i * 2 * dim + d] = segments[i].p1[d];
-            buffer[i * 2 * dim + dim + d] = segments[i].p2[d];
-        }
-    }
-    return buffer;
-}
-
-// Funzione che deserializza il buffer in un vettore di segmenti
-template <int dim>
-std::vector<Segmento<dim>> deserialize_segments(const std::vector<double> &buffer) {
-    const size_t n = buffer.size() / (2 * dim);
-    std::vector<Segmento<dim>> segments(n);
-    for (size_t i = 0; i < n; ++i) {
-        for (int d = 0; d < dim; ++d) {
-            segments[i].p1[d] = buffer[i * 2 * dim + d];
-            segments[i].p2[d] = buffer[i * 2 * dim + dim + d];
-        }
-    }
-    return segments;
-}
-
 template <int dim>
 Tensor<1, dim> rayleigh_kothe_vortex(const Point<dim> &p, double t)
 {
@@ -46,16 +19,6 @@ Tensor<1, dim> rayleigh_kothe_vortex(const Point<dim> &p, double t)
   return vel;
 }
 
-double cutoff(double s)
-{
-  if (s < 0.075)
-    return std::pow((s / 0.1), 2); // quadratica: va da 0 a 1
-  else if (s > 0.925)
-    return std::pow(((1.0 - s) / 0.1), 2);
-  else
-    return 1.0;
-}
-
 template <int dim>
 Tensor<1, dim> rigid_rotation(const Point<dim> &p, double t)
 {
@@ -64,8 +27,8 @@ Tensor<1, dim> rigid_rotation(const Point<dim> &p, double t)
   Tensor<1, dim> vel;
   if (dim == 2)
   {
-    vel[0] = 2*M_PI * (p[1] - 0.5) * cutoff(p[0])* cutoff(p[1]);
-    vel[1] = - 2*M_PI * (p[0] - 0.5) * cutoff(p[0])* cutoff(p[1]);
+    vel[0] = 2*M_PI * (p[1] - 0.5) * cutoff(p[0]);
+    vel[1] = - 2*M_PI * (p[0] - 0.5) * cutoff(p[0]);
   }
   else
   {
@@ -76,86 +39,8 @@ Tensor<1, dim> rigid_rotation(const Point<dim> &p, double t)
 }
 
 template <int dim, int spacedim, typename T>
-std::tuple<std::vector<Point<spacedim>>, std::vector<types::global_dof_index>>
-collect_support_points_with_narrow_band(
-  const Mapping<dim, spacedim>                &mapping,
-  const DoFHandler<dim, spacedim>             &dof_handler_signed_distance,
-  const LinearAlgebra::distributed::Vector<T> &signed_distance,
-  const DoFHandler<dim, spacedim>             &dof_handler_support_points,
-  const double                                 narrow_band_threshold)
-{
-  AssertThrow(narrow_band_threshold >= 0,
-              ExcMessage("The narrow band threshold"
-                          " must be larger than or equal to 0."));
-  const auto &tria = dof_handler_signed_distance.get_triangulation();
-  const Quadrature<dim> quad(dof_handler_support_points.get_fe()
-                                .base_element(0)
-                                .get_unit_support_points());
-
-  FEValues<dim> distance_values(mapping,
-                                dof_handler_signed_distance.get_fe(),
-                                quad,
-                                update_values);
-
-  FEValues<dim> req_values(mapping,
-                            dof_handler_support_points.get_fe(),
-                            quad,
-                            update_quadrature_points);
-
-  std::vector<T>                       temp_distance(quad.size());
-  std::vector<types::global_dof_index> local_dof_indices(
-    dof_handler_support_points.get_fe().n_dofs_per_cell());
-
-  std::vector<Point<dim>>              support_points;
-  std::vector<types::global_dof_index> support_points_idx;
-
-  const bool has_ghost_elements = signed_distance.has_ghost_elements();
-
-  const auto &locally_owned_dofs_req =
-    dof_handler_support_points.locally_owned_dofs();
-  std::vector<bool> flags(locally_owned_dofs_req.n_elements(), false);
-
-  if (has_ghost_elements == false)
-    signed_distance.update_ghost_values();
-
-  for (const auto &cell :
-        tria.active_cell_iterators() | IteratorFilters::LocallyOwnedCell())
-    {
-      const auto cell_distance =
-        cell->as_dof_handler_iterator(dof_handler_signed_distance);
-      distance_values.reinit(cell_distance);
-      distance_values.get_function_values(signed_distance, temp_distance);
-
-      const auto cell_req =
-        cell->as_dof_handler_iterator(dof_handler_support_points);
-      req_values.reinit(cell_req);
-      cell_req->get_dof_indices(local_dof_indices);
-
-      for (const auto q : req_values.quadrature_point_indices())
-        if (std::abs(temp_distance[q]) < narrow_band_threshold)
-          {
-            const auto idx = local_dof_indices[q];
-
-            if (locally_owned_dofs_req.is_element(idx) == false ||
-                flags[locally_owned_dofs_req.index_within_set(idx)])
-              continue;
-
-            flags[locally_owned_dofs_req.index_within_set(idx)] = true;
-
-            support_points_idx.emplace_back(idx);
-            support_points.emplace_back(req_values.quadrature_point(q));
-          }
-    }
-
-  if (has_ghost_elements == false)
-    signed_distance.zero_out_ghost_values();
-
-  return {support_points, support_points_idx};
-}
-
-template <int dim, int spacedim, typename T>
-std::tuple<std::vector<Point<spacedim>> , std::vector<std::vector<int>> >
-collect_interface_points_linear(
+std::tuple<std::vector<Point<spacedim>>, std::map<int,std::vector<std::vector<int>>> , std::vector<std::vector<int>> , std::vector<int> >
+collect_interface_points(
   const Mapping<dim, spacedim>                &mapping,
   const DoFHandler<dim, spacedim>             &dof_handler_signed_distance,
   const LinearAlgebra::distributed::Vector<T> &signed_distance,
@@ -169,19 +54,17 @@ collect_interface_points_linear(
   FEValues<dim> distance_values(mapping,
                                 dof_handler_signed_distance.get_fe(),
                                 quad,
-                                update_values);
+                                update_values | update_quadrature_points);
 
-  FEValues<dim> req_values(mapping,
-                            dof_handler_support_points.get_fe(),
-                            quad,
-                            update_quadrature_points);
+  FEPointEvaluation<1, dim> fe_point_eval(mapping, dof_handler_support_points.get_fe(), update_values | update_gradients);
 
   std::vector<T>                       temp_distance(quad.size());
-  std::vector<types::global_dof_index> local_dof_indices(
-    dof_handler_support_points.get_fe().n_dofs_per_cell());
+  std::vector<types::global_dof_index> local_dof_indices(dof_handler_support_points.get_fe().n_dofs_per_cell());
 
   std::vector<Point<dim>>              interface_points;
-  std::vector<std::vector<int>> interface_segments;
+  std::map<int,std::vector<std::vector<int>>> interface_points_clustered;
+  std::vector<std::vector<int>>        interface_segments;
+  std::vector<int>                     interface_elements;
 
   const bool has_ghost_elements = signed_distance.has_ghost_elements();
 
@@ -197,116 +80,137 @@ collect_interface_points_linear(
         cell->as_dof_handler_iterator(dof_handler_signed_distance);
       distance_values.reinit(cell_distance);
       distance_values.get_function_values(signed_distance, temp_distance);
-
-      const auto cell_req =
-        cell->as_dof_handler_iterator(dof_handler_support_points);
-      req_values.reinit(cell_req);
-      cell_req->get_dof_indices(local_dof_indices);
+      cell_distance->get_dof_indices(local_dof_indices);
 
       std::vector<Point<dim>> segment;
-      std::vector<Point<dim>> nodes_at_zero;
-      for (unsigned int i_edge = 0; i_edge < GeometryInfo< dim >::lines_per_cell; i_edge ++)
-      {
-        int q = GeometryInfo<2>::line_to_cell_vertices(i_edge,0);
-        int q2 = GeometryInfo<2>::line_to_cell_vertices(i_edge,1);
+      std::vector<int> tmp_numbering = {0,1,2,3};
+      
+      compute_intersection_points<dim>(temp_distance, tmp_numbering, distance_values, fe_point_eval, segment, mapping, cell_distance);
+      if (segment.size() != 0)
+        interface_elements.push_back(cell->active_cell_index());
 
-        if (temp_distance[q] * temp_distance[q2] < 0 )
-        {
-          double t = - temp_distance[q2] / (temp_distance[q2] - temp_distance[q]);
-          Point<dim> point = req_values.quadrature_point(q2) + t * (req_values.quadrature_point(q2)-req_values.quadrature_point(q));
-          segment.push_back(point);
-        }
-      }
-
-      if (segment.size() == 2)
+      int n_segments = 9;
+      if (segment.size() == 2 && false)
       {
+        std::vector<int> cell_interface_points;
         auto increment = segment[1] - segment[0];
-        int n_segments = 100;
         increment /= n_segments;
         for (int i = 0; i < n_segments; i++)
         {
           interface_points.push_back(segment[0] + i*increment);
+          cell_interface_points.push_back(cnt_interface_node);
           interface_segments.push_back({cnt_interface_node,cnt_interface_node+1});
           cnt_interface_node++;
         }
-        interface_points.push_back(segment[0] + n_segments*increment);
+        interface_points.push_back(segment[1]);
+        cell_interface_points.push_back(cnt_interface_node);
         cnt_interface_node++;
-      }
-      else if (segment.size() == 4)
-      {
-        for (int i = 0; i < 4; i++)
-        {
-          if (temp_distance[i] > 0)
-          {
-            std::vector<Point<dim>> segment2;
-            for (unsigned int i_edge = 0; i_edge < GeometryInfo< dim >::lines_per_cell; i_edge ++)
-            {
-              int q = GeometryInfo<2>::line_to_cell_vertices(i_edge,0);
-              int q2 = GeometryInfo<2>::line_to_cell_vertices(i_edge,1);
 
-              if (q == i || q2 == i)
-              {
-                if (temp_distance[q] * temp_distance[q2] < 0 )
-                {
-                  double t = - temp_distance[q2] / (temp_distance[q2] - temp_distance[q]);
-                  Point<dim> point = req_values.quadrature_point(q2) + t * (req_values.quadrature_point(q2)-req_values.quadrature_point(q));
-                  segment2.push_back(point);
-                }
-              }
-            }
-            if (segment2.size() == 2)
+        interface_points_clustered[cell->active_cell_index()].push_back(cell_interface_points);
+      }
+      else //if (segment.size() == 4)
+      {
+        std::vector<int> cell_interface_points;
+
+        std::vector<std::vector<int>> subcells(4);
+        subcells[0] = {0, 6, 4, 8};
+        subcells[1] = {6, 1, 8, 5};
+        subcells[2] = {8, 5, 7, 3};
+        subcells[3] = {4, 8, 2, 7};
+
+        for (unsigned int isubcell = 0; isubcell < subcells.size(); isubcell++)
+        {
+          std::vector<Point<dim>> sub_segment;
+          compute_intersection_points<dim>(temp_distance, subcells[isubcell], distance_values, fe_point_eval, sub_segment, mapping, cell_distance);
+
+          if (sub_segment.size() == 2)
+          {
+            auto increment = sub_segment[1] - sub_segment[0];
+            increment /= n_segments;
+            for (int i = 0; i < n_segments; i++)
             {
-              auto increment = segment2[1] - segment2[0];
-              int n_segments = 100;
-              increment /= n_segments;
-              for (int i = 0; i < n_segments; i++)
-              {
-                interface_points.push_back(segment2[0] + i*increment);
-                interface_segments.push_back({cnt_interface_node,cnt_interface_node+1});
-                cnt_interface_node++;
-              }
-              interface_points.push_back(segment2[0] + n_segments*increment);
+              interface_points.push_back(sub_segment[0] + i*increment);
+              cell_interface_points.push_back(cnt_interface_node);
+              interface_segments.push_back({cnt_interface_node,cnt_interface_node+1});
               cnt_interface_node++;
             }
+            interface_points.push_back(sub_segment[1]);
+            cell_interface_points.push_back(cnt_interface_node);
+            cnt_interface_node++;
+
+            interface_points_clustered[cell->active_cell_index()].push_back(cell_interface_points);
+          }
+          else
+          {
+            AssertThrow(sub_segment.size() == 0, ExcMessage("MORE THAN TWO INTERSECTION IN SUBCELL"));
           }
         }
       }
-      else if (segment.size() != 0)
-      {
-        std::cout<<"MORE THAN TWO INTERSECTION POINT"<<std::endl;
-        abort();
-      }
-        
     }
+
 
   if (has_ghost_elements == false)
     signed_distance.zero_out_ghost_values();
 
-  return {interface_points, interface_segments};
+  return {interface_points, interface_points_clustered, interface_segments, interface_elements};
 }
 
 template <int dim>
-std::vector<Point<dim>>
-compute_initial_closest_points(
-  const std::vector<Point<dim>>               &support_points,
-  const std::vector<Point<dim>>               &interface_points)
+void compute_intersection_points(std::vector<double> temp_distance, std::vector<int> node_number, FEValues<dim> & req_values, 
+  FEPointEvaluation<1, dim> & fe_point_eval, std::vector<Point<dim>> & segment, const Mapping<dim, dim> & mapping, 
+  const typename DoFHandler<dim,dim>::cell_iterator  & cell_distance)
 {
-  std::vector<Point<dim>> closest_points;
-
-  for (const auto support_point : support_points)
+  for (unsigned int i_edge = 0; i_edge < GeometryInfo<dim>::lines_per_cell; ++i_edge)
   {
-    double temp_distance = 1.e10;
-    Point<dim> temp_point;
-    for (const auto interface_point : interface_points)
-      if (fabs(support_point.distance(interface_point)) < temp_distance)
-      {
-        temp_distance = fabs(support_point.distance(interface_point));
-        temp_point = interface_point;
-      }
-    closest_points.emplace_back(temp_point);
-  }
+    int q0 = GeometryInfo<dim>::line_to_cell_vertices(i_edge,0);
+    int q1 = GeometryInfo<dim>::line_to_cell_vertices(i_edge,1);
 
-  return closest_points;
+    double phi0 = temp_distance[node_number[q0]];
+    double phi1 = temp_distance[node_number[q1]];
+
+    if (phi0 * phi1 < 0)
+    {
+      Point<dim> p0 = req_values.quadrature_point(node_number[q0]);
+      Point<dim> p1 = req_values.quadrature_point(node_number[q1]);
+
+      Tensor<1, dim> dir = p1 - p0;
+      double length = dir.norm();
+      dir /= length; 
+
+      double s = phi1 / (phi1 - phi0); 
+      Point<dim> x = p1 + s * (p0 - p1);
+
+      p0 = p1;
+      p1 = x;
+
+      for (unsigned int iter = 0; iter < 10; ++iter)
+      {
+          std::vector<Point<dim>> points = {mapping.transform_real_to_unit_cell(cell_distance, x)};
+          fe_point_eval.reinit(cell_distance, ArrayView<const Point<dim>>(points));
+          fe_point_eval.evaluate(temp_distance, EvaluationFlags::values | EvaluationFlags::gradients);
+
+          double phi = fe_point_eval.get_value(0);
+          Tensor<1, dim, double> grad = fe_point_eval.get_gradient(0);
+
+          double dphi_ds = grad * dir; 
+
+          if (std::abs(dphi_ds) < 1e-12)
+            break;
+
+          s = phi / dphi_ds;
+
+          x = x - s * dir;
+
+          if (std::abs(phi) < 1e-10)
+            break;
+          else if (iter == 9)
+          {
+              std::cout << "Warning: Newton method did not converge"<< std::endl;
+          }
+      }
+      segment.push_back(x); 
+    }
+  }
 }
 
 template <int dim, int fe_degree>
@@ -317,6 +221,33 @@ level_set<dim, fe_degree>::level_set(const std::string name, const grid<dim> &gr
   pcout_ptr(&pcout),
   field_name(name)
 {}
+
+namespace SignedDistance
+{
+  template <int dim>
+  class MaxOfTwoSpheres : public Function<dim>
+  {
+  public:
+    MaxOfTwoSpheres(const Point<dim> &center1, double radius1,
+                    const Point<dim> &center2, double radius2)
+      : Function<dim>(1),
+        c1(center1), r1(radius1),
+        c2(center2), r2(radius2) {}
+
+    virtual double value(const Point<dim> &p,
+                          const unsigned int /*component*/ = 0) const override
+    {
+      double sdf1 = p.distance(c1) - r1;
+      double sdf2 = p.distance(c2) - r2;
+      return std::min(sdf1, sdf2); // oppure std::min per unione
+    }
+
+  private:
+    Point<dim> c1, c2;
+    double r1, r2;
+  };
+}
+
 
 template <int dim, int fe_degree>
 void level_set<dim, fe_degree>::init()
@@ -341,6 +272,16 @@ void level_set<dim, fe_degree>::init()
                               0.15),
                             signed_distance);
 
+  // VectorTools::interpolate(mapping,
+  //                          dof_handler,
+  //                          SignedDistance::MaxOfTwoSpheres<dim>(
+  //                            (dim == 2) ? Point<dim>(0.35, 0.5) :
+  //                                         Point<dim>(0.5, 0.5, 0.5),
+  //                            0.25,
+  //                            (dim == 2) ? Point<dim>(0.65, 0.5) :
+  //                                         Point<dim>(0.8, 0.5, 0.5),
+  //                            0.25),
+  //                          signed_distance); 
   // VectorTools::interpolate(mapping,
   //                           dof_handler,
   //                           Functions::SignedDistance::ZalesakDisk<dim>(
@@ -369,7 +310,16 @@ void level_set<dim, fe_degree>::init_test()
                                           Point<dim>(0.5, 0.5, 0.5),
                               0.15),
                             signed_distance_test);
-
+  // VectorTools::interpolate(mapping,
+  //                          dof_handler,
+  //                          SignedDistance::MaxOfTwoSpheres<dim>(
+  //                            (dim == 2) ? Point<dim>(0.35, 0.5) :
+  //                                         Point<dim>(0.5, 0.5, 0.5),
+  //                            0.25,
+  //                            (dim == 2) ? Point<dim>(0.65, 0.5) :
+  //                                         Point<dim>(0.8, 0.5, 0.5),
+  //                            0.25),
+  //                          signed_distance_test);
   // VectorTools::interpolate(mapping,
   //                         dof_handler,
   //                         Functions::SignedDistance::ZalesakDisk<dim>(
@@ -384,11 +334,11 @@ void level_set<dim, fe_degree>::init_test()
 }
 
 template <int dim, int fe_degree>
-void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_band_threshold, int it)
+void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_band_threshold)
 {
   *pcout_ptr << "  - determine interface points" << std::endl;
-  const auto [interface_points, interface_segments_idx] =
-    collect_interface_points_linear(mapping,
+  const auto [interface_points, interface_points_clustered, interface_segments_idx, interface_elements] =
+    collect_interface_points(mapping,
                                     dof_handler,
                                     signed_distance,
                                     dof_handler);                            
@@ -398,7 +348,7 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
   std::vector<Point<dim>> closest_points = interface_points;
 
   constexpr int    max_iter     = 30;
-  constexpr double tol_distance = 1e-8;
+  constexpr double tol_distance = 1e-10;
 
   std::vector<unsigned int> unmatched_points_idx(closest_points.size());
   std::iota(unmatched_points_idx.begin(), unmatched_points_idx.end(), 0);
@@ -453,21 +403,31 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
     *pcout_ptr << "WARNING: The tolerance of " << n_unmatched_points
           << " points is not yet attained." << std::endl;
 
-  auto global_interface_segments = gather_local_segments(interface_segments_idx, closest_points);
-
   *pcout_ptr << "  - determine closest point" << std::endl;
 
   auto support_points_total = DoFTools::map_dofs_to_support_points(mapping, dof_handler);
 
   const auto global_closest_point = gather_local_points(closest_points);
+  if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+    global_interface_point = global_closest_point;
 
-  // std::ofstream out("points"+std::to_string(it)+".txt");
-  // for (const auto &p : global_closest_point)
+  // int quadric_idx = 0;
+  // std::vector<int> point_to_quadric(closest_points.size());
+  // std::map<int,quadric<dim>> interface_quadrics;
+  // for (const auto cell_idx : interface_elements)
   // {
-  //     for (unsigned int d = 0; d < dim; ++d)
-  //         out << p[d] << (d < dim - 1 ? " " : "\n");
+  //   const auto cell_interface_points = interface_points_clustered.at(cell_idx);
+  //   for (const auto points_idx : cell_interface_points)
+  //   {
+  //     quadric<dim> quad(points_idx, closest_points);
+  //     interface_quadrics[quadric_idx] = quad;
+      
+  //     for (const auto point_idx : points_idx)
+  //       point_to_quadric[point_idx] = quadric_idx;
+
+  //     quadric_idx ++;
+  //   }
   // }
-  // out.close();
 
   std::map<int,Point<dim>> point_projection;
   
@@ -480,6 +440,9 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
 
   KDTree index(dim, cloud, {10 /* max leaf */});
   index.buildIndex();
+
+  std::vector<Point<dim>> support_points;
+  std::vector<int> support_points_idx;
 
   for (auto i : locally_owned_dofs)
   {
@@ -495,19 +458,17 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
 
     point_projection[i] = global_closest_point[ret_index];
 
+    if (support_points_total[i].distance(point_projection[i]) < narrow_band_threshold && !(ret_index % 10 == 0 || (ret_index+1) % 10 == 0))
+    {
+      support_points.push_back(support_points_total[i]);
+      support_points_idx.push_back(i);
+    }
+
   }
 
   auto point_projection_copy(point_projection);
 
-  signed_distance.update_ghost_values();
-
-  *pcout_ptr << "  - determine narrow band" << std::endl;
-  const auto [support_points, support_points_idx] =
-    collect_support_points_with_narrow_band(mapping,
-                                            dof_handler,
-                                            signed_distance,
-                                            dof_handler,
-                                            narrow_band_threshold);
+  // signed_distance.update_ghost_values();
 
   *pcout_ptr << "  - tangential correction step" << std::endl;
 
@@ -519,7 +480,7 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
 
   Utilities::MPI::RemotePointEvaluation<dim, dim> rpe2;
 
-  int max_iter2 = 10;
+  int max_iter2 = 30;
   for (int it = 0; it < max_iter2 && n_unmatched_points2 > 0; ++it)
     {
       *pcout_ptr << "    - iteration " << it << ": " << n_unmatched_points2;
@@ -543,33 +504,47 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
 
       for (unsigned int i = 0; i < unmatched_points_idx2.size(); ++i)
       {
-        auto v = support_points[unmatched_points_idx2[i]] - point_projection[support_points_idx[unmatched_points_idx2[i]]];
-        double v_dot_grad = 0;
-        for (int idim = 0; idim < dim; idim ++)
-          v_dot_grad += v[idim] * eval_gradient[i][idim];
+        const unsigned int idx = support_points_idx[unmatched_points_idx2[i]];
+        Tensor<1,dim> v = support_points[unmatched_points_idx2[i]] - point_projection[idx];
 
-        double sin_theta = sqrt(v.norm_square()*eval_gradient[i].norm_square() - v_dot_grad*v_dot_grad) / (v.norm()*eval_gradient[i].norm());
-        auto v_tg = v - (v_dot_grad / eval_gradient[i].norm_square()) * eval_gradient[i];
+        const Tensor<1,dim> &grad = eval_gradient[i];
+        const double grad_norm2 = grad.norm_square();
+        const double v_norm2    = v.norm_square();
+
+        const double v_dot_grad = v * grad;
+        Tensor<1,dim> v_tg = v - (v_dot_grad / grad_norm2) * grad;
+
+        double rho = 1;
+        double new_distance = (point_projection[idx] + rho*v_tg).distance(support_points[unmatched_points_idx2[i]]);
+        double old_distance = point_projection[idx].distance(support_points[unmatched_points_idx2[i]]);
+        while ( new_distance > old_distance && rho > 1.e-8)
+        {
+          rho /= 2;
+        }
+
+        bool updated = false;
+        Tensor<1,dim> delta;
 
         if (std::abs(eval_values[i]) > tol_distance)
-          {
-            point_projection[support_points_idx[unmatched_points_idx2[i]]] -=
-              eval_values[i] * eval_gradient[i];
-
-            unmatched_points_idx_next.emplace_back(unmatched_points_idx2[i]);
-          }
-        else if (v_tg.norm() > 1.e-1*v.norm())
         {
-          point_projection[support_points_idx[unmatched_points_idx2[i]]] +=  v_tg;
+          delta -= eval_values[i] * grad / grad_norm2;
+          updated = true;
+        }
+        if (v_tg.norm_square() > 1.e-3 * v_norm2 && rho > 2.e-8)
+        {
+          delta += rho*v_tg;
+          updated = true;
+        }
+
+        if (updated)
+        {
+          point_projection[idx] += delta;
           unmatched_points_idx_next.emplace_back(unmatched_points_idx2[i]);
         }
       }
 
       unmatched_points_idx2.swap(unmatched_points_idx_next);
-
-      n_unmatched_points2 =
-        Utilities::MPI::sum(unmatched_points_idx2.size(), MPI_COMM_WORLD);
-
+      n_unmatched_points2 = Utilities::MPI::sum(unmatched_points_idx2.size(), MPI_COMM_WORLD);
       *pcout_ptr << " -> " << n_unmatched_points2 << std::endl;
     }
 
@@ -578,8 +553,20 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
   {
     *pcout_ptr << "WARNING: The tolerance of " << n_unmatched_points2
         << " points is not yet attained." << std::endl;
+    not_converged_points.clear();
     for (unsigned int i = 0; i < unmatched_points_idx2.size(); i++)
+    {
+      not_converged_points.push_back(support_points[unmatched_points_idx2[i]]);
       point_projection[support_points_idx[unmatched_points_idx2[i]]] = point_projection_copy[support_points_idx[unmatched_points_idx2[i]]];
+    }
+
+    for (const auto point : not_converged_points)
+      std::cout<<Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)<<": "<<point<<std::endl;
+    std::cout<<std::endl;
+
+    for (const auto i : unmatched_points_idx2)
+      std::cout<<Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)<<": "<<point_projection[support_points_idx[i]]<<std::endl;
+    std::cout<<std::endl;
   }
 
   for (auto i : locally_owned_dofs)
@@ -592,124 +579,6 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
 
   
   signed_distance.update_ghost_values();  
-}
-
-template <int dim, int fe_degree>
-void level_set<dim, fe_degree>::reinit_with_planes(int it)
-{
-  *pcout_ptr << "  - determine interface points" << std::endl;
-  const auto [interface_points, interface_segments_idx] =
-    collect_interface_points_linear(mapping,
-                                    dof_handler,
-                                    signed_distance,
-                                    dof_handler);                            
-
-  *pcout_ptr << "  - point projection on the interface" << std::endl;
-
-  std::vector<Point<dim>> closest_points = interface_points;
-
-  constexpr int    max_iter     = 30;
-  constexpr double tol_distance = 1e-8;
-
-  std::vector<unsigned int> unmatched_points_idx(closest_points.size());
-  std::iota(unmatched_points_idx.begin(), unmatched_points_idx.end(), 0);
-
-  std::vector<bool> flags(unmatched_points_idx.size(), false);
-
-  int n_unmatched_points =
-    Utilities::MPI::sum(unmatched_points_idx.size(), MPI_COMM_WORLD);
-
-  Utilities::MPI::RemotePointEvaluation<dim, dim> rpe;
-
-  for (int it = 0; it < max_iter && n_unmatched_points > 0; ++it)
-    {
-      *pcout_ptr << "    - iteration " << it << ": " << n_unmatched_points;
-
-      std::vector<Point<dim>> unmatched_points(unmatched_points_idx.size());
-      for (unsigned int i = 0; i < unmatched_points_idx.size(); ++i)
-        unmatched_points[i] = closest_points[unmatched_points_idx[i]];
-
-      rpe.reinit(unmatched_points, grid_ptr->triangulation, mapping);
-
-      AssertThrow(rpe.all_points_found(),
-                  ExcMessage("Processed point is outside domain."));
-
-      const auto eval_values =
-        VectorTools::point_values<1>(rpe, dof_handler, signed_distance);
-
-      const auto eval_gradient =
-        VectorTools::point_gradients<1>(rpe, dof_handler, signed_distance);
-
-      std::vector<unsigned int> unmatched_points_idx_next;
-
-      for (unsigned int i = 0; i < unmatched_points_idx.size(); ++i)
-        if (std::abs(eval_values[i]) > tol_distance)
-        {
-          closest_points[unmatched_points_idx[i]] -=
-            eval_values[i] * eval_gradient[i] / eval_gradient[i].norm_square();
-
-          unmatched_points_idx_next.emplace_back(unmatched_points_idx[i]);
-        }
-
-      unmatched_points_idx.swap(unmatched_points_idx_next);
-
-      n_unmatched_points =
-        Utilities::MPI::sum(unmatched_points_idx.size(), MPI_COMM_WORLD);
-
-      *pcout_ptr << " -> " << n_unmatched_points << std::endl;
-    }
-
-
-  if (n_unmatched_points > 0)
-    *pcout_ptr << "WARNING: The tolerance of " << n_unmatched_points
-          << " points is not yet attained." << std::endl;
-
-  auto global_interface_segments = gather_local_segments(interface_segments_idx, closest_points);
-
-  *pcout_ptr << "  - determine closest point" << std::endl;
-
-  auto support_points_total = DoFTools::map_dofs_to_support_points(mapping, dof_handler);
-
-  const auto global_closest_point = gather_local_points(closest_points);
-
-  // std::ofstream out("points"+std::to_string(it)+".txt");
-  // for (const auto &p : global_closest_point)
-  // {
-  //     for (unsigned int d = 0; d < dim; ++d)
-  //         out << p[d] << (d < dim - 1 ? " " : "\n");
-  // }
-  // out.close();
-
-  std::map<int,Point<dim>> point_projection;
-
-  DealII_SegmentCloud<dim> cloud;
-  cloud.pts = global_interface_segments;
-  using KDTree = nanoflann::KDTreeSingleIndexAdaptor<
-        nanoflann::L2_Simple_Adaptor<double, DealII_SegmentCloud<dim>>,
-        DealII_SegmentCloud<dim>,
-        dim>;
-
-  KDTree index(dim, cloud, {10 /* max leaf */});
-  index.buildIndex();
-
-  for (auto i : locally_owned_dofs)
-  {
-    int sign;
-    (signed_distance[i]>0) ? sign = 1 : sign = -1;
-
-    size_t ret_index;
-    double out_dist_sqr;
-
-    nanoflann::KNNResultSet<double> resultSet(1);
-    resultSet.init(&ret_index, &out_dist_sqr);
-    index.findNeighbors(resultSet, &support_points_total[i][0], nanoflann::SearchParameters());
-
-    double distance = global_interface_segments[ret_index].distance_to(support_points_total[i]);
-    signed_distance[i] = distance*sign;
-
-  }
-
-  signed_distance.update_ghost_values();
 }
 
 template <int dim, int fe_degree>
@@ -809,7 +678,7 @@ void level_set<dim, fe_degree>::adv(double t)
   #endif
 
   SolverGMRES<LA::MPI::Vector>::AdditionalData additional_data;
-  additional_data.max_basis_size = 100;
+  additional_data.max_basis_size = 50;
   SolverGMRES<LA::MPI::Vector> solver(solver_control, additional_data);
   LA::MPI::PreconditionAMG preconditioner;
   preconditioner.initialize(system_matrix, data);
@@ -1025,6 +894,23 @@ std::vector<double> level_set<dim, fe_degree>::compute_error_l2()
   FEValues<dim> fe_values(fe, quadrature_formula,
                           update_values | update_gradients |
                           update_quadrature_points | update_JxW_values);
+
+  const Quadrature<dim> quad(dof_handler.get_fe()
+                                .base_element(0)
+                                .get_unit_support_points());
+
+  FEValues<dim> distance_values(mapping,
+                                dof_handler.get_fe(),
+                                quad,
+                                update_values | update_quadrature_points);
+
+  // FEValues<dim> req_values(mapping,
+  //                           dof_handler.get_fe(),
+  //                           quad,
+  //                           update_quadrature_points);
+
+  FEPointEvaluation<1, dim> fe_point_eval(mapping, dof_handler.get_fe(), update_values | update_gradients);
+
   const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
   const unsigned int n_q_points    = quadrature_formula.size();
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
@@ -1033,40 +919,21 @@ std::vector<double> level_set<dim, fe_degree>::compute_error_l2()
   signed_distance_test.update_ghost_values();
   
   double local_integral = 0.;
-  double local_color_error = 0.;
+  double local_color_integral = 0.;
   for (const auto &cell : dof_handler.active_cell_iterators())
     if (cell->is_locally_owned())
       {
+        
         double error    = 0.;
-        double cell_error = 0;
-        double cell_color = 0.;
-        double test_cell_color = 0.;
         double area = 0;
-
         fe_values.reinit(cell);
         cell->get_dof_indices(local_dof_indices);
         for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
           {
             for (unsigned int j = 0; j < dofs_per_cell; ++j)
               {
-                int color = signed_distance[local_dof_indices[j]] / fabs(signed_distance[local_dof_indices[j]]) <= 0 ?
-                            1 : 0;
-                int test_color = signed_distance_test[local_dof_indices[j]] / fabs(signed_distance_test[local_dof_indices[j]]) <= 0 ?
-                            1 : 0;
                 error += (signed_distance[local_dof_indices[j]] - signed_distance_test[local_dof_indices[j]]) *
                                 (signed_distance[local_dof_indices[j]] - signed_distance_test[local_dof_indices[j]]) *
-                                fe_values.shape_value(j, q_point) *
-                                fe_values.JxW(q_point);
-
-                cell_error += (color - test_color) * (color - test_color)*
-                                fe_values.shape_value(j, q_point) *
-                                fe_values.JxW(q_point);
-                
-                cell_color += color *
-                                fe_values.shape_value(j, q_point) *
-                                fe_values.JxW(q_point);
-
-                test_cell_color += test_color *
                                 fe_values.shape_value(j, q_point) *
                                 fe_values.JxW(q_point);
 
@@ -1075,14 +942,106 @@ std::vector<double> level_set<dim, fe_degree>::compute_error_l2()
               }
 
           }
-
-        local_color_error += cell_error;
         
         local_integral += error;
+
+        double phase_area = 0;
+        double phase_area_test = 0;
+
+        const auto cell_req = cell->as_dof_handler_iterator(dof_handler);
+        // req_values.reinit(cell_req);
+        distance_values.reinit(cell_req);
+
+        std::vector<double> temp_distance(dofs_per_cell);
+        std::vector<double> temp_distance_test(dofs_per_cell);
+        
+        distance_values.get_function_values(signed_distance, temp_distance);
+        distance_values.get_function_values(signed_distance_test, temp_distance_test);
+
+        std::vector<Point<dim>> polygon_points;
+        std::vector<Point<dim>> polygon_points_test;
+
+        std::vector<int> tmp_numbering = {0,1,2,3};
+        compute_intersection_points<dim>(temp_distance, tmp_numbering, distance_values, fe_point_eval, polygon_points, mapping, cell_req);
+        compute_intersection_points<dim>(temp_distance_test, tmp_numbering, distance_values, fe_point_eval, polygon_points_test, mapping, cell_req);
+
+        if (polygon_points.size()>0)
+        {  
+          for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
+          {
+            if (temp_distance[vertex_index] < 0)
+              polygon_points.push_back(distance_values.quadrature_point(vertex_index));
+          }               
+          phase_area = shoelace<dim>(polygon_points);
+        }
+        else
+        {
+          double sum = 0;
+          for (unsigned int i = 0; i < dofs_per_cell; ++i)
+            sum += temp_distance[i];
+          if (sum < 0)
+            phase_area = area;
+        }
+
+        if (polygon_points_test.size()>0)
+        {  
+          for (auto vertex_index : GeometryInfo<dim>::vertex_indices())
+          {
+            if (temp_distance_test[vertex_index] < 0)
+              polygon_points_test.push_back(distance_values.quadrature_point(vertex_index));
+          }      
+          phase_area_test = shoelace<dim>(polygon_points_test);         
+        }
+       else
+        {
+          double sum = 0;
+          for (unsigned int i = 0; i < dofs_per_cell; ++i)
+            sum += temp_distance_test[i];
+          if (sum < 0)
+            phase_area_test = area;
+        }
+
+        
+        local_color_integral += ( phase_area - phase_area_test ) * ( phase_area - phase_area_test );
+        
       }
   
-  return {local_integral , local_color_error};
+  return {local_integral , local_color_integral};
+}
 
+template <int dim>
+double shoelace(std::vector<Point<dim>> pts)
+{
+    static_assert(dim == 2, "Shoelace è definita solo per dim=2 in questa versione");
+
+    if (pts.size() < 3)
+        return 0.0;
+
+    double cx = 0.0, cy = 0.0;
+    for (const auto &p : pts)
+    {
+        cx += p[0];
+        cy += p[1];
+    }
+    cx /= pts.size();
+    cy /= pts.size();
+
+    std::sort(pts.begin(), pts.end(),
+              [cx, cy](const Point<2> &a, const Point<2> &b) {
+                  double ang_a = std::atan2(a[1] - cy, a[0] - cx);
+                  double ang_b = std::atan2(b[1] - cy, b[0] - cx);
+                  return ang_a < ang_b;
+              });
+
+    double sum = 0.0;
+    for (unsigned int i = 0; i < pts.size(); ++i)
+    {
+        const auto &p1 = pts[i];
+        const auto &p2 = pts[(i + 1) % pts.size()];
+        sum += p1[0] * p2[1] - p2[0] * p1[1];
+    }
+
+    return std::abs(sum) * 0.5;
 }
 
 template <int dim, int fe_degree>
@@ -1090,6 +1049,24 @@ void level_set<dim, fe_degree>::print()
 {
   grid_ptr->data_out.add_data_vector(dof_handler, signed_distance, field_name);
   grid_ptr->data_out.build_patches(mapping);
+}
+
+template <int dim,  int fe_degree> 
+void level_set<dim, fe_degree>::print_marker(const int it)
+{
+  if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+  {
+    std::vector<std::pair<double,std::string>> times_and_names;
+    std::string fname = "../resu_"+std::to_string(grid_ptr->N_ele)+"/markers/marker_" + std::to_string(it) + ".csv";
+
+    std::ofstream f(fname);
+    f << "X,Y,value\n";
+    for (unsigned int i=0; i<global_interface_point.size(); ++i)
+        f << std::setprecision(8)
+          << global_interface_point[i][0] << ","
+          << global_interface_point[i][1] << ","
+          << i << "\n";
+  }
 }
 
 template <int dim, int fe_degree>
@@ -1157,54 +1134,6 @@ std::vector<Point<dim>> gather_local_points(const std::vector<Point<dim>> &local
   }
 
   return point_total;
-}
-
-template <int dim> 
-std::vector<Segmento<dim>> gather_local_segments(std::vector<std::vector<int>> interface_segments_idx, std::vector<Point<dim>> closest_points)
-{
-  std::vector<Segmento<dim>> interface_segments;
-  for (unsigned int i_segment = 0; i_segment < interface_segments_idx.size(); i_segment++)
-  {
-    Segmento<dim> i_segmento;
-    i_segmento.p1 = closest_points[interface_segments_idx[i_segment][0]];
-    i_segmento.p2 = closest_points[interface_segments_idx[i_segment][1]];
-    interface_segments.push_back(i_segmento);
-  }
-  
-
-  int rank, size;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-  std::vector<double> local_buffer = serialize_segments<dim>(interface_segments);
-  const int local_count = local_buffer.size();
-
-  std::vector<int> recvcounts(size), displs(size);
-  int total_count = 0;
-
-  MPI_Gather(&local_count, 1, MPI_INT,
-            recvcounts.data(), 1, MPI_INT,
-            0, MPI_COMM_WORLD);
-
-  if (rank == 0) {
-      displs[0] = 0;
-      for (int i = 1; i < size; ++i)
-          displs[i] = displs[i - 1] + recvcounts[i - 1];
-      total_count = displs[size - 1] + recvcounts[size - 1];
-  }
-
-  MPI_Bcast(&total_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
-  std::vector<double> global_buffer(total_count);
-
-  MPI_Gatherv(local_buffer.data(), local_count, MPI_DOUBLE,
-              global_buffer.data(), recvcounts.data(), displs.data(), MPI_DOUBLE,
-              0, MPI_COMM_WORLD);
-
-  MPI_Bcast(global_buffer.data(), total_count, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-  auto gathered_segments = deserialize_segments<dim>(global_buffer);
-
-  return gathered_segments;
 }
 
 

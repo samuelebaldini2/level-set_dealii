@@ -43,8 +43,10 @@ public:
   
   DistributedTriangulation<dim> triangulation;
   mutable DataOut<dim> data_out;
-private:
+
   int N_ele;
+  
+private:
   std::vector< std::pair< double, std::string > > times_and_names;
 };
 
