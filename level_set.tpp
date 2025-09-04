@@ -239,7 +239,7 @@ namespace SignedDistance
     {
       double sdf1 = p.distance(c1) - r1;
       double sdf2 = p.distance(c2) - r2;
-      return std::min(sdf1, sdf2); // oppure std::min per unione
+      return std::min(sdf1, sdf2); 
     }
 
   private:
