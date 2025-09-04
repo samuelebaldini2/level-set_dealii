@@ -51,6 +51,9 @@ endif()
 
 
 deal_ii_initialize_cached_variables()
+include_directories("/usr/include/eigen3")
+
 set(CLEAN_UP_FILES *.log *.gmv *.gnuplot *.gpl *.eps *.pov *.ucd *.d2 *.vtu *.pvtu)
 project(${TARGET})
+
 deal_ii_invoke_autopilot()

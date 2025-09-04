@@ -468,8 +468,6 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
 
   auto point_projection_copy(point_projection);
 
-  // signed_distance.update_ghost_values();
-
   *pcout_ptr << "  - tangential correction step" << std::endl;
 
   std::vector<unsigned int> unmatched_points_idx2(support_points.size());
@@ -517,9 +515,10 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
         double rho = 1;
         double new_distance = (point_projection[idx] + rho*v_tg).distance(support_points[unmatched_points_idx2[i]]);
         double old_distance = point_projection[idx].distance(support_points[unmatched_points_idx2[i]]);
-        while ( new_distance > old_distance && rho > 1.e-8)
+        while ( new_distance > old_distance && rho > 1.e-6)
         {
           rho /= 2;
+          new_distance = (point_projection[idx] + rho*v_tg).distance(support_points[unmatched_points_idx2[i]]);
         }
 
         bool updated = false;
@@ -530,7 +529,7 @@ void level_set<dim, fe_degree>::reinit_with_tangential_correction(double narrow_
           delta -= eval_values[i] * grad / grad_norm2;
           updated = true;
         }
-        if (v_tg.norm_square() > 1.e-3 * v_norm2 && rho > 2.e-8)
+        if (v_tg.norm_square() > 1.e-3 * v_norm2 && rho > 2.e-6)
         {
           delta += rho*v_tg;
           updated = true;
@@ -1012,7 +1011,7 @@ std::vector<double> level_set<dim, fe_degree>::compute_error_l2()
 template <int dim>
 double shoelace(std::vector<Point<dim>> pts)
 {
-    static_assert(dim == 2, "Shoelace è definita solo per dim=2 in questa versione");
+    static_assert(dim == 2, "Shoelace è definita solo per dim=2");
 
     if (pts.size() < 3)
         return 0.0;

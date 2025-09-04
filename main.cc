@@ -25,9 +25,10 @@ int main(int argc, char **argv)
   double dt_array[3] = {0.005, 0.0025, 0.00125};
   int max_it_array[3] = {400, 800, 1600};
   int reinit_each[3] = {2,4,8};
-  double narrow_band_width = 0.5/N;
   for (int level = 0; level < 3; level++)
   {
+    double narrow_band_width = 0.5/N;
+
     const int dim = 2;
     grid<dim> grd(N);
 
@@ -63,7 +64,6 @@ int main(int argc, char **argv)
         levelset.print_marker(it);
         grd.write_vtu(dt*it, it);
       }   
-      
     }
 
     levelset.init_test();
